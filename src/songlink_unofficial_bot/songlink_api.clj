@@ -4,15 +4,18 @@
 
 
 
-(defn fetch-links [songlinkable]
+(defn fetch-links
+  {:test #(assert (fetch-links "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4"))}
+  [songlinkable & [token]]
   (->> songlinkable
-   (url-encode)
-   (str "https://api.song.link/v1-alpha.1/links?url=")
-   slurp
-   json/parse-string))
+       (url-encode)
+       (str "https://api.song.link/v1-alpha.1/links?" (when token (str "key=" token)) "&url=")
+       slurp
+       json/parse-string))
 
 
-(defn platforms-to-urls [links-response]
+(defn platforms-to-urls
+  [links-response]
   (->> (get links-response "linksByPlatform")
       (map (fn [[platform {url "url"}]] {platform url}))
       (into {})))

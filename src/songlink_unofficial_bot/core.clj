@@ -73,7 +73,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
   [text]
   (when-let* [songlinkable (platform-link text)
               songlink (text-to-songlink songlinkable)
-              sldata (sl/fetch-links songlinkable)
+              sldata (sl/fetch-links songlinkable (env :songlink-token))
               direct-link-platforms ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]
               kbd (-> sldata sl/platforms-to-urls (select-keys direct-link-platforms) keyboard)]
 
