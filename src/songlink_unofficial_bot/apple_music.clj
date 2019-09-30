@@ -2,6 +2,8 @@
   (:require [cheshire.core :as json]
             [ring.util.codec :refer [form-encode] ]))
 
+(declare article)
+
 
 (defn search-url
   "to search for albums, use {:term \"Queen\" :entity \"album\"}
@@ -14,36 +16,69 @@
 
 (defn search [prm]
   (let [ url (search-url prm)
-         result (slurp url)]
-    (-> result
+         song (slurp url)]
+    (-> song
         json/parse-string
         clojure.walk/keywordize-keys
         :results)))
 
 
-(defn song-result->inline-article [result]
-  {:type "article"
-   :id (str "song-" (:trackId result))
+(defn lookup [prm]
+  (let [url (str "https://itunes.apple.com/lookup?" (form-encode prm))
+        song (slurp url)]
+    (-> song
+        json/parse-string
+        clojure.walk/keywordize-keys
+        :results
+        ))
+  )
 
-   :thumb_url (:artworkUrl30 result)
-   :title (:trackName result)
-   :description (str "From " (:collectionName result) " by " (:artistName result))
+(comment
+  ;; (lookup {:id 722399370 :entity "album,song" :country "US"})
+
+  (lookup {:id 836834718 :entity "song", :country "US"})
+
+  )
+
+
+
+(defmulti article :kind)
+(defmethod article "song" [song]
+  {:type "article"
+   :id (str "song-" (:trackId song))
+
+   :thumb_url (:artworkUrl30 song)
+   :title (str (:trackName song))
+   :description (str "Song by " (:artistName song) " From " (:collectionName song))
 
    :hide_url false
-   :url (str "https://song.link/" (:trackViewUrl result))
-   :message_text (str "https://song.link/" (:trackViewUrl result))
+   :url (str "https://song.link/" (:trackViewUrl song))
+   :message_text (str "https://song.link/" (:trackViewUrl song))
+   })
+
+(defmethod article "album" [album]
+  {:type "article"
+   :id (str "album-" (:albumId album))
+
+   :thumb_url (:artworkUrl30 album)
+   :title (str (:collectionName album))
+   :description (str "Album by " (:artistName album))
+
+   :hide_url false
+   :url (str "https://song.link/" (:collectionViewUrl album))
+   :message_text (str "https://song.link/" (:collectionViewUrl album))
    })
 
 
-(defn song-result->audio
-  "https://core.telegram.org/bots/api#inlinequeryresultaudio"
-  [result]
+(defn audio "https://core.telegram.org/bots/api#inlinequeryresultaudio"
+  [song]
   {:type "audio"
-   :id (str "song-preview-" (:trackId result))
-   :audio_url (:previewUrl result)
-   :title (:trackName result)
-   :caption (:trackName result)
-   :performer (:artistName result)
+   :id (str "song-preview-" (:trackId song ))
+   :audio_url (:previewUrl song)
+   :audio (:previewUrl song)
+   :title (:trackName song)
+   :caption (:trackName song)
+   :performer (:artistName song)
    })
 
 
