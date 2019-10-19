@@ -56,7 +56,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
    "googleStore"
    "amazonStore"])
 
-(declare keyboard keyboard-redirect-blindly redirect-link telegram responses inline-results)
+(declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios links-response inline-results)
 
 (defn platform-link [text]
   (let [text (or text "")
@@ -68,16 +68,28 @@ Your phone app should remember me after first use and add me ro autocompleted us
 (defn text-to-songlink [text]
   (when-let [link (platform-link text)] (str "https://song.link/" link)))
 
+
 (defn responses
   {:test #(do (assert (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")))}
   [text]
   (when-let* [songlinkable (platform-link text)
               songlink (text-to-songlink songlinkable)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
-              direct-link-platforms ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]
-              kbd (-> sldata sl/platforms-to-urls (select-keys direct-link-platforms) keyboard)]
+              main-response (links-response sldata)
+              audios []]
+    (into [main-response] audios)))
 
-             [{:text songlink, :disable_notification true, :reply_markup {:inline_keyboard kbd}}]))
+
+;; (defn links-response [songlink platforms-to-urls]
+(defn links-response
+  ([sldata] (links-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
+  ([sldata platforms]
+    (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms))
+                platforms-to-urls (not-empty direct-links)
+                kbd (keyboard platforms-to-urls)
+                response {:text (get sldata "pageUrl"), :disable_notification true, :reply_markup {:inline_keyboard kbd}}]
+      response)))
+
 
 (h/defhandler songbot
   (h/command-fn "start"
@@ -90,7 +102,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
   (h/message-fn
    (fn [{text :text {id :id} :chat}]
-     (let [respond-closure #(doseq [r (responses text)] (telegram token id r))]
+     (let [respond-closure #(doseq [r (remove nil? (responses text))] (telegram token id r))]
        (do
          (async/go (async/thread-call respond-closure))
          "OK"))))
