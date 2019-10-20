@@ -56,7 +56,8 @@ Your phone app should remember me after first use and add me ro autocompleted us
    "googleStore"
    "amazonStore"])
 
-(declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios links-response inline-results)
+(declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios
+         direct-links-keyboard-response thumbnail-response  inline-results)
 
 (defn platform-link [text]
   (let [text (or text "")
@@ -73,23 +74,52 @@ Your phone app should remember me after first use and add me ro autocompleted us
   {:test #(do (assert (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")))}
   [text]
   (when-let* [songlinkable (platform-link text)
-              songlink (text-to-songlink songlinkable)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
-              main-response (links-response sldata)
+              main-response (thumbnail-response sldata)
               audios []]
     (into [main-response] audios)))
 
 
-;; (defn links-response [songlink platforms-to-urls]
-(defn links-response
-  ([sldata] (links-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
+(defn direct-links-keyboard-response
+  ([sldata] (direct-links-keyboard-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
   ([sldata platforms]
-    (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms))
-                platforms-to-urls (not-empty direct-links)
-                kbd (keyboard platforms-to-urls)
-                response {:text (get sldata "pageUrl"), :disable_notification true, :reply_markup {:inline_keyboard kbd}}]
-      response)))
+   (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms))
+               platforms-to-urls (not-empty direct-links)
+               kbd (keyboard platforms-to-urls)
+               response {:text (get sldata "pageUrl"), :disable_notification true, :reply_markup {:inline_keyboard kbd}}]
+     response)))
 
+
+(defn thumbnail-response
+  ([sldata] (thumbnail-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
+  ([sldata platforms]
+   (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms) )
+               platforms-to-urls (not-empty direct-links)
+               sorted-urls (into (sorted-map) platforms-to-urls)
+               platform-links (for [[platform link] sorted-urls] (str "[" platform  "](" link ")") )
+               three-in-line (->> platform-links (partition 3) (map (partial interpose " ")) (map (partial apply str)))
+               apple (sl/meta sldata "appleMusic")
+               entity-desc (str "*" (:title apple) "* - " (:type apple) " by " (:artistName apple))
+               caption-lines (concat [entity-desc
+                                      (str "[Page with all links](" (get sldata "pageUrl") ")")]
+                                     three-in-line
+                                     ["_Powered by song.link_"
+                                      "- _an automated service helping artists and fans to share music across all platforms._"])
+               caption (apply str (interpose "\n" caption-lines ))
+               response {
+                         :method "/sendPhoto"
+                         :parse_mode :markdown
+                         :photo (:thumbnailUrl apple)
+                         :disable_notification true
+                         :caption caption}]
+     response)))
+
+
+
+
+;; (defn tlgr [r]
+;;   (telegram (env :telegram-token) (env :test-chat-id) r (or (:method r) "/sendText"))
+;;   )
 
 (h/defhandler songbot
   (h/command-fn "start"
@@ -102,7 +132,10 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
   (h/message-fn
    (fn [{text :text {id :id} :chat}]
-     (let [respond-closure #(doseq [r (remove nil? (responses text))] (telegram token id r))]
+     (let [respond-closure
+           #(doseq
+                [r (remove nil? (responses text))]
+              (telegram token id r (or (:method r) "/sendText") ))]
        (do
          (async/go (async/thread-call respond-closure))
          "OK"))))
@@ -162,7 +195,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
        (partition 3)))
 
 (cmpj/defroutes app-routes
-  (cmpj/POST "/handler" {tg-update :body} (do #_(println (-> tg-update :message :text)) (songbot tg-update) "OK"))
+  (cmpj/POST "/handler" {tg-update :body} (do (println (-> tg-update :message :text)) (songbot tg-update) "OK"))
   (cmpj/GET "/hello" {} "howdy")
   (route/not-found (do (println "N/F") "Not Found")))
 
@@ -205,7 +238,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
   ;; (for [r (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")] (println (spy :info r)))
 
 
-  ;; (t/send-text token (env :test-chat-id) ((comp apple/audio first apple/lookup) {:id 836834718}) "swans" )
+  (t/send-text token (env :test-chat-id) ((comp apple/audio first apple/lookup) {:id 836834718}) "swans" )
 
   (telegram token (env :test-chat-id) aud "/sendAudio")
 
@@ -216,11 +249,14 @@ Your phone app should remember me after first use and add me ro autocompleted us
   (def aud {:id "song-preview-836834718",
     ;; :audio "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview71/v4/2c/b5/44/2cb54444-5a1d-fffd-38eb-3e0eb3f7a686/mzaf_4387625555806532278.plus.aac.p.m4a",
     ;; :audio "https://p.scdn.co/mp3-preview/3eb16018c2a700240e9dfb8817b6f2d041f15eb1?cid=774b29d4f13844c495f206cafdad9c86",
-            :audio "http://www.largesound.com/ashborytour/sound/brobob.mp3",
+            ;; :audio "http://www.largesound.com/ashborytour/sound/brobob.mp3",
+            :audio "http://listen.vo.llnwd.net/g3/5/4/6/1/1/1504511645.mp3",
             :title "Screen Shot",
             :caption "Screen Shot",
             :performer "Swans"
-            :thumb "https://is4-ssl.mzstatic.com/image/thumb/Music6/v4/c6/e6/ec/c6e6ecca-e3b5-6036-65c6-25e430db8802/source/30x30bb.jpg"}))
+            :thumb "https://is4-ssl.mzstatic.com/image/thumb/Music6/v4/c6/e6/ec/c6e6ecca-e3b5-6036-65c6-25e430db8802/source/30x30bb.jpg"})
+
+  )
 
 (comment
   (text-to-songlink  "Hey there https://play.google.com/music/m/Bzfnl3fgkfta3eq5zouiax4n7mq?t=Aquamarine_-_Ash_Walker")
@@ -290,6 +326,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
                    :dev-local-polling
                    :env
                    :telegram-token))
+
     (try (clj-http.client/get (str morse.api/base-url token "/deleteWebhook")) (catch Exception e (println e)))
 
     (def poller (p/start token songbot {:timeout 25})))
@@ -338,4 +375,6 @@ Your phone app should remember me after first use and add me ro autocompleted us
                       ;; :chat {:last_name "Test Lastname", :id (env :test-chat-id), :first_name "Test", :username "Test"},
                       ;; :message_id 1365,
                       ;; :from {:last_name "Test Lastname", :id 1111111, :first_name "Test", :username "Test"},
-                      :text "https://play.google.com/music/m/T2rvt35lcfnvkis57qcx66hfpie?t=Do_It_Without_You"}}))
+                      :text "https://play.google.com/music/m/T2rvt35lcfnvkis57qcx66hfpie?t=Do_It_Without_You"}})
+
+  )
