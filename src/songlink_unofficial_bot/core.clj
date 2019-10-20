@@ -58,7 +58,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
    "amazonStore"])
 
 (declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios
-         direct-links-keyboard-response thumbnail-response  inline-results)
+         direct-links-keyboard-response thumbnail-response thumbnail+keyboard inline-results)
 
 (defn platform-link [text]
   (let [text (or text "")
@@ -76,7 +76,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
   [text]
   (when-let* [songlinkable (platform-link text)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
-              main-response (thumbnail-response sldata)
+              main-response (thumbnail+keyboard sldata)
               auds (audios sldata)]
     (concat [main-response] auds)))
 
@@ -89,6 +89,12 @@ Your phone app should remember me after first use and add me ro autocompleted us
                kbd (keyboard platforms-to-urls)
                response {:text (get sldata "pageUrl"), :disable_notification true, :reply_markup {:inline_keyboard kbd}}]
      response)))
+
+
+(defn thumbnail+keyboard [sldata]
+  (let [thumbnail- (thumbnail-response sldata)
+        keyboard- (direct-links-keyboard-response sldata)]
+    (merge thumbnail- (select-keys keyboard- [:reply_markup]))))
 
 
 (defn thumbnail-response
