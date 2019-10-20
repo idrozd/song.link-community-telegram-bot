@@ -13,11 +13,12 @@
             [ring.logger :as logger]
             [ring.middleware.json :refer [wrap-json-body]]
             [songlink-unofficial-bot.apple-music :as apple]
-            [songlink-unofficial-bot.songlink-api :as sl]))
+            [songlink-unofficial-bot.songlink-api :as sl]
+            [songlink-unofficial-bot.deezer :as deezer]
+            ))
+
 
 ;; why isn't this in clojure.core?
-
-
 (defmacro when-let*
   ([bindings & body]
    (if (seq bindings)
@@ -76,8 +77,8 @@ Your phone app should remember me after first use and add me ro autocompleted us
   (when-let* [songlinkable (platform-link text)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
               main-response (thumbnail-response sldata)
-              audios []]
-    (into [main-response] audios)))
+              auds (audios sldata)]
+    (concat [main-response] auds)))
 
 
 (defn direct-links-keyboard-response
@@ -117,9 +118,55 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
 
 
-;; (defn tlgr [r]
-;;   (telegram (env :telegram-token) (env :test-chat-id) r (or (:method r) "/sendText"))
-;;   )
+
+
+(defn audios [sldata]
+  (let [deezer-meta (sl/meta sldata "deezer")
+        deezer-type (case (get deezer-meta :type) "album" "album", "song" "track" )
+        deezer-data (deezer/fetch (:id deezer-meta) deezer-type)
+        tracks (->> deezer-data deezer/tracks (sort-by :rank) reverse (take 3))
+        ;; sender-producer (fn [audio-msg] #(t/send-audio (:token env) (:test-chat-id env) audio-msg #break (slurp #break (:audio audio-msg))  ))]
+        sender-producer
+        (fn [audio-msg chat-id]
+          (with-open [audio (clojure.java.io/input-stream (:audio audio-msg))]
+             (t/send-file token chat-id
+                          (merge (select-keys audio-msg [:performer :title]) {:caption "Preview"})
+                          audio "/sendAudio" "audio"
+                          (str (:title audio-msg) " by " (:performer audio-msg)))))]
+    (->> tracks (map deezer/audio) (map #(partial sender-producer %)))))
+
+
+
+
+(comment
+  ;; (->>  "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4"
+  (->> "https://music.apple.com/us/album/to-be-kind/836834698"
+      sl/fetch-links
+      audios
+      ;; (map #(apply %1 [(:test-chat-id env)]))
+      (map #(async/thread-call (partial %1 (:test-chat-id env))))
+      )
+
+
+  (with-open [audio (clojure.java.io/input-stream "https://cdns-preview-5.dzcdn.net/stream/c-5d83eb82603f6857c97fd676dfd9a7a2-3.mp3")]
+    (t/send-audio (:telegram-token env) (:test-chat-id env) audio-msg audio))
+
+
+  (with-open [audio (clojure.java.io/input-stream "https://cdns-preview-5.dzcdn.net/stream/c-5d83eb82603f6857c97fd676dfd9a7a2-3.mp3")]
+    (t/send-file (:telegram-token env) (:test-chat-id env) {} audio "/sendAudio" "audio" "Swans - Screen shot"))
+
+
+  (def audio-msg {
+      :caption "Screen Shot",
+      :type "audio",
+      :title "Screen Shot",
+      :id "song-preview-77782878",
+      :performer "Swans"})
+
+  )
+
+
+(defn tlgr [r] (telegram (env :telegram-token) (env :test-chat-id) r (or (:method r) "/sendText")))
 
 (h/defhandler songbot
   (h/command-fn "start"
@@ -133,9 +180,10 @@ Your phone app should remember me after first use and add me ro autocompleted us
   (h/message-fn
    (fn [{text :text {id :id} :chat}]
      (let [respond-closure
-           #(doseq
-                [r (remove nil? (responses text))]
-              (telegram token id r (or (:method r) "/sendText") ))]
+           #(doseq [r (remove nil? (responses text))]
+              (if (fn? r)
+                  (async/thread-call (partial r id))
+                  (telegram token id r (or (:method r) "/sendText") )))]
        (do
          (async/go (async/thread-call respond-closure))
          "OK"))))
@@ -289,7 +337,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
   (def rrr (responses "https://play.google.com/music/m/Tj3dcgqkouvia6wd7bi36w2quwu?t=Rosie_-_DJ_Shadow"))
 
-  (telegram token (env :test-chat-id) (first rrr))
+  (tlgr (first rrr))
 
   (do
     (t/send-text token (env :test-chat-id) "hello")
