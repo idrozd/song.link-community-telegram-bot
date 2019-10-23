@@ -57,7 +57,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
    "googleStore"
    "amazonStore"])
 
-(declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios
+(declare keyboard keyboard-redirect-blindly redirect-link telegram responses audios send-audio message-fn
          direct-links-keyboard-response thumbnail-response thumbnail+keyboard inline-results)
 
 (defn platform-link [text]
@@ -76,9 +76,36 @@ Your phone app should remember me after first use and add me ro autocompleted us
   [text]
   (when-let* [songlinkable (platform-link text)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
-              main-response (thumbnail+keyboard sldata)
+              main-response (direct-links-keyboard-response sldata)
               auds (audios sldata)]
-    (concat [main-response] auds)))
+    (into [main-response] auds)))
+
+
+(defn responses-audio
+  {:test #(do (assert (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")))}
+  [text]
+  (when-let* [songlinkable (platform-link text)
+              sldata (sl/fetch-links songlinkable (env :songlink-token))
+              keyboard- (direct-links-keyboard-response sldata)
+              ;; links-message (merge (first audio-messages) (select-keys keyboard- [:reply_markup]) )
+              ]
+    (if-let [deezer-meta (sl/meta sldata "deezer")]
+      (let [deezer-type (case (get deezer-meta :type) "album" "album", "song" "track" )
+            deezer-data (deezer/fetch (:id deezer-meta) deezer-type)
+            audio-messages
+            (->> deezer-data deezer/tracks (sort-by :rank)
+                 reverse (take 2) (map deezer/audio) (map #(partial send-audio %)))]
+        (concat [keyboard-] audio-messages))
+      [keyboard-])
+    ))
+
+
+(defn send-audio [audio-msg chat-id]
+  (with-open [audio-stream (clojure.java.io/input-stream (:audio audio-msg))]
+    (t/send-file token chat-id
+      (select-keys audio-msg [:performer :title :caption])
+      audio-stream "/sendAudio" "audio"
+      (str (:title audio-msg) " by " (:performer audio-msg) " preview"))))
 
 
 (defn direct-links-keyboard-response
@@ -87,92 +114,54 @@ Your phone app should remember me after first use and add me ro autocompleted us
    (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms))
                platforms-to-urls (not-empty direct-links)
                kbd (keyboard platforms-to-urls)
-               response {:text (get sldata "pageUrl"), :disable_notification true, :reply_markup {:inline_keyboard kbd}}]
-     response)))
-
-
-(defn thumbnail+keyboard [sldata]
-  (let [thumbnail- (thumbnail-response sldata)
-        keyboard- (direct-links-keyboard-response sldata)]
-    (merge thumbnail- (select-keys keyboard- [:reply_markup]))))
-
-
-(defn thumbnail-response
-  ([sldata] (thumbnail-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
-  ([sldata platforms]
-   (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms) )
-               platforms-to-urls (not-empty direct-links)
-               sorted-urls (into (sorted-map) platforms-to-urls)
-               platform-links (for [[platform link] sorted-urls] (str "[" platform  "](" link ")") )
-               three-in-line (->> platform-links (partition 3) (map (partial interpose " ")) (map (partial apply str)))
                apple (sl/meta sldata "appleMusic")
                entity-desc (str "*" (:title apple) "* - " (:type apple) " by " (:artistName apple))
-               caption-lines (concat [entity-desc
-                                      (str "[Page with all links](" (get sldata "pageUrl") ")")]
-                                     three-in-line
-                                     ["_Powered by song.link_"
-                                      "- _an automated service helping artists and fans to share music across all platforms._"])
-               caption (apply str (interpose "\n" caption-lines ))
-               response {
-                         :method "/sendPhoto"
-                         :parse_mode :markdown
-                         :photo (:thumbnailUrl apple)
-                         :disable_notification true
-                         :caption caption}]
-     response)))
-
-
-
-
+               lines (concat [entity-desc
+                      (str "[Page with all links](" (get sldata "pageUrl") ")")]
+                      ["_Powered by song.link_"
+                       "- _an automated service helping artists and fans to share music across all platforms._"
+                       "_Previews_ - _deezer.com_"])]
+     {:disable_web_page_preview true
+      :text (apply str (interpose "\n" lines )),
+      :parse_mode :markdown
+      :disable_notification true,
+      :reply_markup {:inline_keyboard kbd}})))
 
 
 (defn audios [sldata]
   (let [deezer-meta (sl/meta sldata "deezer")
         deezer-type (case (get deezer-meta :type) "album" "album", "song" "track" )
         deezer-data (deezer/fetch (:id deezer-meta) deezer-type)
-        tracks (->> deezer-data deezer/tracks (sort-by :rank) reverse (take 3))
-        ;; sender-producer (fn [audio-msg] #(t/send-audio (:token env) (:test-chat-id env) audio-msg #break (slurp #break (:audio audio-msg))  ))]
-        sender-producer
-        (fn [audio-msg chat-id]
-          (with-open [audio (clojure.java.io/input-stream (:audio audio-msg))]
-             (t/send-file token chat-id
-                          (merge (select-keys audio-msg [:performer :title]) {:caption "Preview"})
-                          audio "/sendAudio" "audio"
-                          (str (:title audio-msg) " by " (:performer audio-msg)))))]
-    (->> tracks (map deezer/audio) (map #(partial sender-producer %)))))
-
-
+        tracks (->> deezer-data deezer/tracks (sort-by :rank) reverse (take 2))]
+    (->> tracks (map deezer/audio) (map #(partial send-audio %)))))
 
 
 (comment
-  ;; (->>  "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4"
-  (->> "https://music.apple.com/us/album/to-be-kind/836834698"
-      sl/fetch-links
-      audios
-      ;; (map #(apply %1 [(:test-chat-id env)]))
-      (map #(async/thread-call (partial %1 (:test-chat-id env))))
-      )
 
-
-  (with-open [audio (clojure.java.io/input-stream "https://cdns-preview-5.dzcdn.net/stream/c-5d83eb82603f6857c97fd676dfd9a7a2-3.mp3")]
-    (t/send-audio (:telegram-token env) (:test-chat-id env) audio-msg audio))
-
+  (respond "https://music.apple.com/us/album/to-be-kind/836834698" (:test-chat-id env))
 
   (with-open [audio (clojure.java.io/input-stream "https://cdns-preview-5.dzcdn.net/stream/c-5d83eb82603f6857c97fd676dfd9a7a2-3.mp3")]
     (t/send-file (:telegram-token env) (:test-chat-id env) {} audio "/sendAudio" "audio" "Swans - Screen shot"))
 
-
-  (def audio-msg {
-      :caption "Screen Shot",
-      :type "audio",
-      :title "Screen Shot",
-      :id "song-preview-77782878",
-      :performer "Swans"})
-
   )
 
 
-(defn tlgr [r] (telegram (env :telegram-token) (env :test-chat-id) r (or (:method r) "/sendText")))
+(defn tlgr [r] (telegram (env :telegram-token) (env :test-chat-id) r (or (:method r) "/sendMessage")))
+
+
+(defn respond [text chat-id]
+  (doseq [r (remove nil? (responses-audio text))]
+    (if (fn? r)
+      (async/thread-call (partial r chat-id))
+      (telegram token chat-id r (or (:method r) "/sendMessage") ))))
+
+
+(defn message-fn
+  [{text :text {id :id} :chat}]
+  (do
+    (async/go (async/thread-call (partial respond text id)))
+    "OK"))
+
 
 (h/defhandler songbot
   (h/command-fn "start"
@@ -183,16 +172,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
     (fn [{{id :id :as chat} :chat}]
       (t/send-text token id about)))
 
-  (h/message-fn
-   (fn [{text :text {id :id} :chat}]
-     (let [respond-closure
-           #(doseq [r (remove nil? (responses text))]
-              (if (fn? r)
-                  (async/thread-call (partial r id))
-                  (telegram token id r (or (:method r) "/sendText") )))]
-       (do
-         (async/go (async/thread-call respond-closure))
-         "OK"))))
+  (h/message-fn message-fn)
 
   (h/inline-fn
    (fn [{id :id term :query offset :offset}]
@@ -283,19 +263,6 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
   (require '[clojure.tools.logging :refer [spy]])
 
-  (for [r (responses text)] (telegram token (env :test-chat-id) r))
-
-  (telegram token (env :test-chat-id) {:text "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4"})
-
-  (t/send-text token (env :test-chat-id) {:text "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4"} "aaka")
-
-  ;; (for [r (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")] (println (spy :info r)))
-
-
-  (t/send-text token (env :test-chat-id) ((comp apple/audio first apple/lookup) {:id 836834718}) "swans" )
-
-  (telegram token (env :test-chat-id) aud "/sendAudio")
-
   ((comp apple/audio first apple/lookup) {:id 836834718})
 
   ;; (t/send-audio token (env :test-chat-id) {:title "ahah" :performer "huhu"} (clojure.java.io/file "/Users/atitov/Downloads/DESTINYS CHILD - Lose My Breath (Four Tet Remix).mp3"))
@@ -313,63 +280,17 @@ Your phone app should remember me after first use and add me ro autocompleted us
   )
 
 (comment
-  (text-to-songlink  "Hey there https://play.google.com/music/m/Bzfnl3fgkfta3eq5zouiax4n7mq?t=Aquamarine_-_Ash_Walker")
-
-  (text-to-songlink  "https://music.youtube.com/playlist?list=OLAK5uy_ljyHMKPSgmFBdsKR7pC6Ht52ngcPWlgQw") ;; won't work
-
-  (text-to-songlink  "Hey there ")
-
-  (def results-example
-    [{:type "article"
-      :id 100500
-      :url "https://music.apple.com/ru/album/bohemian-rapsody-feat-ghost-town-trio-live/722399370?i=722399676&uo=4"
-      :title "Some-album"
-      :hide_url false
-      :description "Bohemian Rapsody (feat. Ghost Town Trio)"
-      :message_text "https://music.apple.com/ru/album/bohemian-rapsody-feat-ghost-town-trio-live/722399370?i=722399676&uo=4"
-      :thumb_url "https://is3-ssl.mzstatic.com/image/thumb/Music4/v4/ab/d9/14/abd914fe-aba8-0ad9-176b-6cd7ecc5dfed/source/60x60bb.jpg"}]))
-
-(comment
 
   ;; (songbot (merge msg {:text "/help"}))
-  (songbot msg)
-
-  (def msg {:update_id 1005009999
-            :message {;;:date 1441645532,
-                      :chat {:last_name "Test Lastname", :id (env :test-chat-id), :first_name "Test", :username "Test"},
-                      :message_id 1365,
-                      :from {:last_name "Test Lastname", :id 1111111, :first_name "Test", :username "Test"},
-                      :text "https://play.google.com/music/m/T2rvt35lcfnvkis57qcx66hfpie?t=Do_It_Without_You"}})
+  ;; (songbot msg)
 
   (def rrr (responses "https://play.google.com/music/m/Tj3dcgqkouvia6wd7bi36w2quwu?t=Rosie_-_DJ_Shadow"))
 
+  (responses "https://play.google.com/music/m/Tj3dcgqkouvia6wd7bi36w2quwu?t=Rosie_-_DJ_Shadow")
+
   (tlgr (first rrr))
 
-  (do
-    (t/send-text token (env :test-chat-id) "hello")
-    (telegram token (env :test-chat-id) {:text "telegram for you sir"})
-    (t/send-text token (env :test-chat-id) "hey"))
-
-  (env :test-chat-id)
-
-  (->>
-   {:term "hello" :entity "song,album"}
-   apple/search
-   ;; (mapcat (juxt apple/inline-article apple/song-result->audio))))))
-   (mapcat (juxt apple/inline-article)))
-
-  (songbot inline-update-example)
-
-  (def inline-update-example
-    {:update_id 529813125,
-     :inline_query {:id 155931020654442318,
-                    :query "queen",
-                    :offset nil
-                    :from {:id 36305519,
-                           :is_bot false,
-                           :first_name "Andrei",
-                           :username "le_gif_whisperer",
-                           :language_code "en"}}}))
+  )
 
 (comment
   ;;  cider workbench
@@ -385,7 +306,9 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
     (def poller (p/start token songbot {:timeout 25})))
 
+
   (clj-http.client/get (str morse.api/base-url token "/getUpdates"))
+
 
   ;;RESTART
   (do (async/close! poller)
@@ -399,36 +322,3 @@ Your phone app should remember me after first use and add me ro autocompleted us
   (do
     (require '[clojure.tools.namespace.repl :refer [refresh]])
     (refresh)))
-
-(comment
-  ;; TESTS
-  (do
-    (test #'responses))
-
-  )
-
-(comment
-
-  (songbot msg)
-
-  (let [id (env :test-chat-id)
-        text  "https://play.google.com/music/m/T2rvt35lcfnvkis57qcx66hfpie?t=Do_It_Without_You"
-        rs (responses text)
-        respond-closure #(for [r rs] (telegram token id r))]
-    (do
-      (telegram token id {:text "hello"})
-      ;; (telegram token id (first rs))
-      ;; (println rs)
-      (doseq [r rs] (telegram token id r))
-      ;; (respond-closure)
-      ;; (async/go (async/thread-call respond-closure))
-      "OK"))
-
-  (def msg {:update_id 1005009999
-            :message {;;:date 1441645532,
-                      ;; :chat {:last_name "Test Lastname", :id (env :test-chat-id), :first_name "Test", :username "Test"},
-                      ;; :message_id 1365,
-                      ;; :from {:last_name "Test Lastname", :id 1111111, :first_name "Test", :username "Test"},
-                      :text "https://play.google.com/music/m/T2rvt35lcfnvkis57qcx66hfpie?t=Do_It_Without_You"}})
-
-  )

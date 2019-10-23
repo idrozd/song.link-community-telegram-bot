@@ -20,22 +20,12 @@
 (defn album [fetched]
   (or (:album fetched) fetched) )
 
-;; id=uuid4(),
-;; audio_url=audio['download'],
-;; title=audio["title"],
-;; performer=audio["artist"],
-;; audio_duration=audio["duration"]
-
 (defn audio [track]
   {:type "audio"
    :id (str "song-preview-" (:id track ))
-   ;; :audio_url (:preview track)
-   ;; :audio_duration ()
    :audio (:preview track)
    :title (:title track)
-   :caption (:title_short track)
-   :thumb (get-in track [:album :cover_small])
-   ;; :performer (get-in track [:artist "name"])})
+   ;; :thumb (get-in track [:album :cover_small])
    :performer (get-in track [:artist :name])})
 
 
