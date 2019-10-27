@@ -76,20 +76,10 @@ Your phone app should remember me after first use and add me ro autocompleted us
   [text]
   (when-let* [songlinkable (platform-link text)
               sldata (sl/fetch-links songlinkable (env :songlink-token))
-              main-response (direct-links-keyboard-response sldata)
-              auds (audios sldata)]
-    (into [main-response] auds)))
-
-
-(defn responses-audio
-  {:test #(do (assert (responses "https://music.apple.com/us/album/screen-shot/836834698?i=836834718&ign-mpt=uo%3D4")))}
-  [text]
-  (when-let* [songlinkable (platform-link text)
-              sldata (sl/fetch-links songlinkable (env :songlink-token))
               keyboard- (direct-links-keyboard-response sldata)
               ;; links-message (merge (first audio-messages) (select-keys keyboard- [:reply_markup]) )
               ]
-    (if-let [deezer-meta (sl/meta sldata "deezer")]
+    (if-let [deezer-meta (sl/for-service sldata "deezer")]
       (let [deezer-type (case (get deezer-meta :type) "album" "album", "song" "track" )
             deezer-data (deezer/fetch (:id deezer-meta) deezer-type)
             audio-messages
@@ -109,12 +99,12 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
 
 (defn direct-links-keyboard-response
-  ([sldata] (direct-links-keyboard-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud"]))
+  ([sldata] (direct-links-keyboard-response sldata ["spotify"  "appleMusic" "youtube" "youtubeMusic" "google" "amazonMusic" "yandex" "itunes" "soundcloud" "deezer"]))
   ([sldata platforms]
    (when-let* [direct-links (-> sldata sl/platforms-to-urls (select-keys platforms))
                platforms-to-urls (not-empty direct-links)
                kbd (keyboard platforms-to-urls)
-               apple (sl/meta sldata "appleMusic")
+               apple (sl/for-service sldata "appleMusic")
                entity-desc (str "*" (:title apple) "* - " (:type apple) " by " (:artistName apple))
                lines (concat [entity-desc
                       (str "[Page with all links](" (get sldata "pageUrl") ")")]
@@ -126,14 +116,6 @@ Your phone app should remember me after first use and add me ro autocompleted us
       :parse_mode :markdown
       :disable_notification true,
       :reply_markup {:inline_keyboard kbd}})))
-
-
-(defn audios [sldata]
-  (let [deezer-meta (sl/meta sldata "deezer")
-        deezer-type (case (get deezer-meta :type) "album" "album", "song" "track" )
-        deezer-data (deezer/fetch (:id deezer-meta) deezer-type)
-        tracks (->> deezer-data deezer/tracks (sort-by :rank) reverse (take 2))]
-    (->> tracks (map deezer/audio) (map #(partial send-audio %)))))
 
 
 (comment
@@ -150,7 +132,7 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
 
 (defn respond [text chat-id]
-  (doseq [r (remove nil? (responses-audio text))]
+  (doseq [r (remove nil? (responses text))]
     (if (fn? r)
       (async/thread-call (partial r chat-id))
       (telegram token chat-id r (or (:method r) "/sendMessage") ))))
@@ -265,8 +247,6 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
   ((comp apple/audio first apple/lookup) {:id 836834718})
 
-  ;; (t/send-audio token (env :test-chat-id) {:title "ahah" :performer "huhu"} (clojure.java.io/file "/Users/atitov/Downloads/DESTINYS CHILD - Lose My Breath (Four Tet Remix).mp3"))
-
   (def aud {:id "song-preview-836834718",
     ;; :audio "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview71/v4/2c/b5/44/2cb54444-5a1d-fffd-38eb-3e0eb3f7a686/mzaf_4387625555806532278.plus.aac.p.m4a",
     ;; :audio "https://p.scdn.co/mp3-preview/3eb16018c2a700240e9dfb8817b6f2d041f15eb1?cid=774b29d4f13844c495f206cafdad9c86",
@@ -281,33 +261,20 @@ Your phone app should remember me after first use and add me ro autocompleted us
 
 (comment
 
-  ;; (songbot (merge msg {:text "/help"}))
-  ;; (songbot msg)
-
-  (def rrr (responses "https://play.google.com/music/m/Tj3dcgqkouvia6wd7bi36w2quwu?t=Rosie_-_DJ_Shadow"))
-
-  (responses "https://play.google.com/music/m/Tj3dcgqkouvia6wd7bi36w2quwu?t=Rosie_-_DJ_Shadow")
-
-  (tlgr (first rrr))
+  (responses "https://music.apple.com/ru/album/always-already-here/1470649197?l=en")
 
   )
 
+
 (comment
   ;;  cider workbench
-  (do
-    (def token (-> "profiles.clj"
-                   slurp
-                   read-string
-                   :dev-local-polling
-                   :env
-                   :telegram-token))
-
-    (try (clj-http.client/get (str morse.api/base-url token "/deleteWebhook")) (catch Exception e (println e)))
-
-    (def poller (p/start token songbot {:timeout 25})))
-
-
   (clj-http.client/get (str morse.api/base-url token "/getUpdates"))
+
+
+  (do
+    (def token (-> "profiles.clj" slurp read-string :dev-local-polling :env :telegram-token))
+    (try (clj-http.client/get (str morse.api/base-url token "/deleteWebhook")) (catch Exception e (println e)))
+    (def poller (p/start token songbot {:timeout 25})))
 
 
   ;;RESTART

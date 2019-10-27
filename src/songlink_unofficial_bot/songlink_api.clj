@@ -21,12 +21,11 @@
       (into {})))
 
 
-(defn meta
-  ([links] (meta links "appleMusic"))
+(defn for-service
+  ([links] (for-service links "appleMusic"))
   ([links platform]
-   (let [unique-id (get-in links ["linksByPlatform" platform "entityUniqueId"])
-         entity-id (clojure.string/split unique-id #"::" )]
-     (merge {:id entity-id} (clojure.walk/keywordize-keys (get-in links ["entitiesByUniqueId" unique-id]))))))
+   (let [unique-id (get-in links ["linksByPlatform" platform "entityUniqueId"])]
+     (clojure.walk/keywordize-keys (get-in links ["entitiesByUniqueId" unique-id])))))
 
 
 
